@@ -164,6 +164,7 @@ button.chip:not(:disabled):active{transform:translateY(1px)}
 
   <div id="dock">
     <div class="chips">
+      <button class="chip" id="btnView"></button>
       <button class="chip" id="btnExpand"></button>
       <button class="chip hidden" id="btnReforge"></button>
     </div>
@@ -185,7 +186,8 @@ button.chip:not(:disabled):active{transform:translateY(1px)}
 'use strict';
 
 /* ================= 定数・ユーティリティ ================= */
-const TW=128, TH=64, ZU=72, MAXR=4;
+const TW=128, TH=64, MAXR=4;
+let ZU=72;
 const SAVE_KEY='foundryIsle.v1';
 const $=s=>document.querySelector(s);
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
@@ -232,7 +234,7 @@ const MS=[10,25,50,100,150,200,300,400,500];
 const EXPAND_COST={3:6000,4:900000};
 const REFORGE_MIN=5e6;
 
-function defaultState(){return {coins:15,run:0,total:0,gears:0,rad:2,unl:0,b:[],buffT:0,taps:0,deliv:0,sound:true,t:Date.now()};}
+function defaultState(){return {coins:15,run:0,total:0,gears:0,rad:2,unl:0,b:[],buffT:0,taps:0,deliv:0,sound:true,low:false,t:Date.now()};}
 let S=defaultState();
 const DEPOT={gx:0,gy:0,pulse:0,lv:1,depot:true};
 
@@ -394,7 +396,7 @@ const sfx={
 /* ================= セーブ ================= */
 function save(){
   try{S.t=Date.now();localStorage.setItem(SAVE_KEY,JSON.stringify({
-    coins:S.coins,run:S.run,total:S.total,gears:S.gears,rad:S.rad,unl:S.unl,buffT:S.buffT,taps:S.taps,deliv:S.deliv,sound:S.sound,t:S.t,
+    coins:S.coins,run:S.run,total:S.total,gears:S.gears,rad:S.rad,unl:S.unl,buffT:S.buffT,taps:S.taps,deliv:S.deliv,sound:S.sound,low:S.low,t:S.t,
     b:S.b.map(b=>({gx:b.gx,gy:b.gy,type:b.type,lv:b.lv,t:b.t}))
   }));}catch(e){}
 }
@@ -431,6 +433,7 @@ function credit(amt,fx){
 }
 function step(dt){
   gt+=dt;
+  ZU=lerp(ZU,S.low?32:72,Math.min(1,dt*7));
   if(S.buffT>0)S.buffT=Math.max(0,S.buffT-dt);
   for(const b of S.b){
     const T=TYPES[b.type];b.t+=dt;
@@ -527,31 +530,42 @@ let sel=null,hover=null,mode='1';
 const ptrs=new Map();let drag=null,pinch=null;
 function selB(){if(!sel)return null;if(sel.gx===0&&sel.gy===0)return DEPOT;return bAt(sel.gx,sel.gy)||null;}
 function toWorld(sx,sy){const c=cam();return [(sx-c.ox)/c.s,(sy-c.oy)/c.s];}
-function pick(sx,sy){
-  const w=toWorld(sx,sy),wx=w[0],wy=w[1];
-  if(GC.on){const d=Math.hypot(wx-GC.x,wy-GC.y);if(d<Math.max(62,34/cam().s))return {kind:'gold'};}
+function goldHit(sx,sy){if(!GC.on)return false;const w=toWorld(sx,sy);return Math.hypot(w[0]-GC.x,w[1]-GC.y)<Math.max(62,34/cam().s);}
+function candidates(sx,sy){
+  const w=toWorld(sx,sy),wx=w[0],wy=w[1],out=[];
   const all=S.b.concat([DEPOT]).sort((a,b)=>(b.gx+b.gy)-(a.gx+a.gy));
   for(const b of all){
     const c=px(b.gx,b.gy,0);
-    if(Math.abs(wx-c[0])<TW*.3&&wy>c[1]-(bh(b)+.2)*ZU-10&&wy<c[1]+TH*.28)return {kind:'tile',gx:b.gx,gy:b.gy};
+    if(Math.abs(wx-c[0])<TW*.3&&wy>c[1]-(bh(b)+.2)*ZU-10&&wy<c[1]+TH*.28)out.push({gx:b.gx,gy:b.gy});
   }
   const u=wx/(TW/2),v=wy/(TH/2);
   const gx=Math.round((u+v)/2),gy=Math.round((v-u)/2);
-  if(Math.abs(gx)<=MAXR&&Math.abs(gy)<=MAXR)return {kind:'tile',gx:gx,gy:gy};
-  return null;
+  if(Math.abs(gx)<=MAXR&&Math.abs(gy)<=MAXR&&!out.some(o=>o.gx===gx&&o.gy===gy))out.push({gx:gx,gy:gy});
+  return out;
 }
+function pick(sx,sy){
+  if(goldHit(sx,sy))return {kind:'gold'};
+  const c=candidates(sx,sy).filter(t=>isLand(t.gx,t.gy));
+  return c.length?{kind:'tile',gx:c[0].gx,gy:c[0].gy}:null;
+}
+let lastClick={x:-99,y:-99},overlapHinted=false;
 function clickAt(sx,sy){
   audioInit();
-  const p=pick(sx,sy);
-  if(!p){setSel(null);return;}
-  if(p.kind==='gold'){grabGold();return;}
-  if(!isLand(p.gx,p.gy)){toast('この区画は、島を広げると使えるようになる');setSel(null);return;}
-  if(p.gx===0&&p.gy===0){
+  if(goldHit(sx,sy)){grabGold();return;}
+  const all=candidates(sx,sy);
+  const cands=all.filter(t=>isLand(t.gx,t.gy));
+  if(!cands.length){if(all.length)toast('この区画は、島を広げると使えるようになる');setSel(null);return;}
+  let t=cands[0];
+  const near=Math.hypot(sx-lastClick.x,sy-lastClick.y)<16;
+  if(cands.length>1&&near&&sel){const i=cands.findIndex(c=>c.gx===sel.gx&&c.gy===sel.gy);if(i>=0)t=cands[(i+1)%cands.length];}
+  lastClick={x:sx,y:sy};
+  if(cands.length>1&&!overlapHinted){overlapHinted=true;toast('建物が重なっている。同じ場所をもう一度タップすると奥の区画に切り替わる',4200);}
+  if(t.gx===0&&t.gy===0){
     const amt=1+ips()*.03;credit(amt,false);S.taps++;
-    DEPOT.pulse=1;const t=depotTop();addFloat(t[0],t[1]-4,'+'+fmt(amt,true));
+    DEPOT.pulse=1;const dt=depotTop();addFloat(dt[0],dt[1]-4,'+'+fmt(amt,true));
     sfx.tap();ring(px(.2,.2,.1)[0],px(.2,.2,.1)[1],60,'#fff1c2',.45);
   }
-  setSel({gx:p.gx,gy:p.gy});
+  setSel({gx:t.gx,gy:t.gy});
 }
 function grabGold(){
   GC.on=false;GC.next=rnd(55,100);
@@ -612,6 +626,7 @@ $('#btnMenu').addEventListener('click',()=>{
   audioInit();
   showModal('<h2>島の記録</h2><div class="kv"><span>これまでの総収入</span><span>'+fmt(S.total)+'</span><span>納品した荷</span><span>'+S.deliv.toLocaleString('ja-JP')+'</span><span>集荷塔のタップ</span><span>'+S.taps.toLocaleString('ja-JP')+'</span><span>歯車</span><span>'+S.gears+'</span></div><div class="row"><button class="mbtn" data-m="sound">'+(S.sound?'サウンド:オン':'サウンド:オフ')+'</button><button class="mbtn dng" data-m="wipe">データを消去</button><button class="mbtn pri" data-m="close">閉じる</button></div>');
 });
+$('#btnView').addEventListener('click',()=>{audioInit();S.low=!S.low;save();});
 $('#btnExpand').addEventListener('click',()=>{audioInit();doExpand();});
 $('#btnReforge').addEventListener('click',()=>{
   audioInit();const g=reforgeGain();
@@ -674,6 +689,7 @@ function updateHud(dt){
   const bf=$('#buff');
   if(S.buffT>0){bf.classList.remove('hidden');setText(bf,'生産×3  あと'+Math.ceil(S.buffT)+'秒');}else bf.classList.add('hidden');
   const gc=$('#gearchip');if(S.gears>0){gc.classList.remove('hidden');setText($('#gears'),String(S.gears));}else gc.classList.add('hidden');
+  setText($('#btnView'),S.low?'建物を元の高さに戻す':'建物を低く表示');
   const be=$('#btnExpand');
   if(S.rad>=MAXR){be.classList.add('hidden');}
   else{be.classList.remove('hidden');const c=EXPAND_COST[S.rad+1];
@@ -1056,6 +1072,50 @@ function drawClouds(){
   }
 }
 
+
+function covers(b,tx,ty){
+  if(b.gx===tx&&b.gy===ty)return false;
+  if(b.gx+b.gy<=tx+ty)return false;
+  const cb=px(b.gx,b.gy,0),ce=px(tx,ty,0);
+  return Math.abs(cb[0]-ce[0])<TW*.62&&(cb[1]-(bh(b)+.05)*ZU)<ce[1]+TH*.25;
+}
+function rr(x,y,w,hh,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+hh,r);ctx.arcTo(x+w,y+hh,x,y+hh,r);ctx.arcTo(x,y+hh,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function badge(b,fs){
+  const c=px(b.gx,b.gy,0);const text='Lv '+b.lv;
+  ctx.font='700 '+fs+'px "Zen Kaku Gothic New","Hiragino Kaku Gothic ProN",sans-serif';
+  const w=ctx.measureText(text).width+fs*.9,hh=fs*1.45,x=c[0]-w/2,y=c[1]+TH*.4-hh/2;
+  const tr=tierOf(b.lv);
+  rr(x,y,w,hh,hh/2);ctx.fillStyle='rgba(14,30,37,.86)';ctx.fill();
+  ctx.lineWidth=1.6;ctx.strokeStyle=tr>0?'#e6bb5a':'rgba(236,242,239,.35)';ctx.stroke();
+  ctx.fillStyle='#f2f6f3';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(text,c[0],y+hh/2+.5);ctx.textBaseline='alphabetic';
+}
+function tag(gx,gy,fs,strong){
+  const b=gx===0&&gy===0?DEPOT:bAt(gx,gy);
+  let l1,l2;
+  if(!b){l1='空き区画';l2=null;}
+  else if(b.depot){l1='集荷塔';l2='タップで資金';}
+  else{l1=TYPES[b.type].name+'  Lv '+b.lv;l2='毎秒 '+fmt(rateOf(b),true);}
+  const top=b?px(gx,gy,(b.depot?1.0:bh(b))+.25):px(gx,gy,.3);
+  ctx.font='800 '+fs+'px "Shippori Mincho B1","Hiragino Mincho ProN",serif';
+  const w1=ctx.measureText(l1).width;
+  ctx.font='700 '+(fs*.82)+'px "Zen Kaku Gothic New",sans-serif';
+  const w2=l2?ctx.measureText(l2).width:0;
+  const w=Math.max(w1,w2)+fs*1.3,hh=l2?fs*2.6:fs*1.75;
+  const x=top[0]-w/2,y=top[1]-hh-10;
+  ctx.fillStyle='rgba(14,30,37,.94)';rr(x,y,w,hh,6);ctx.fill();
+  ctx.lineWidth=strong?2:1;ctx.strokeStyle=strong?'#f0c56a':'rgba(236,242,239,.4)';ctx.stroke();
+  ctx.beginPath();ctx.moveTo(top[0]-7,y+hh);ctx.lineTo(top[0]+7,y+hh);ctx.lineTo(top[0],y+hh+9);ctx.closePath();ctx.fillStyle='rgba(14,30,37,.94)';ctx.fill();
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.font='800 '+fs+'px "Shippori Mincho B1","Hiragino Mincho ProN",serif';ctx.fillStyle='#f6f2e4';ctx.fillText(l1,top[0],y+(l2?fs*.95:hh/2));
+  if(l2){ctx.font='700 '+(fs*.82)+'px "Zen Kaku Gothic New",sans-serif';ctx.fillStyle='#8fd0c0';ctx.fillText(l2,top[0],y+fs*1.95);}
+  ctx.textBaseline='alphabetic';
+}
+function plotTop(gx,gy,strong){
+  const q=[px(gx-.42,gy-.42,0),px(gx+.42,gy-.42,0),px(gx+.42,gy+.42,0),px(gx-.42,gy+.42,0)];
+  ctx.setLineDash([8,6]);poly(q,strong?'rgba(246,208,102,.16)':'rgba(255,250,225,.1)',strong?'rgba(246,208,102,.95)':'rgba(255,250,225,.75)',2.4);ctx.setLineDash([]);
+  if(!strong){const c=px(gx,gy,0);ctx.strokeStyle='rgba(255,250,225,.8)';ctx.lineWidth=2.4;ctx.beginPath();ctx.moveTo(c[0]-8,c[1]);ctx.lineTo(c[0]+8,c[1]);ctx.moveTo(c[0],c[1]-4);ctx.lineTo(c[0],c[1]+4);ctx.stroke();}
+}
+
 /* ================= メイン描画 ================= */
 function render(){
   const c=cam();
@@ -1084,11 +1144,25 @@ function render(){
     poly([px(.5,-.5,0),px(1.5,-.5,0),px(1.5,.5,0),px(.5,.5,0)],'rgba(255,240,190,'+(.1+.16*a).toFixed(2)+')','rgba(246,208,102,'+(.5+.4*a).toFixed(2)+')',3);
   }
   for(const b of S.b)shadowOf(b);shadowOf(DEPOT);
+  const objs=S.b.concat([DEPOT]);
   for(let gx=-R;gx<=R;gx++)for(let gy=-R;gy<=R;gy++){
-    if(gx===0&&gy===0){dDepot();continue;}
-    const b=bAt(gx,gy);if(b)drawObject(b);
+    const o=(gx===0&&gy===0)?DEPOT:bAt(gx,gy);if(!o)continue;
+    const tg=sel&&objs.length&&covers(o,sel.gx,sel.gy)?.24:1;
+    o.fa=lerp(o.fa==null?1:o.fa,tg,.22);
+    ctx.globalAlpha=o.fa;drawObject(o);ctx.globalAlpha=1;
   }
   for(const p of PARCELS)drawParcel(p);
+  /* 最前面:隠れた区画の目印・選択表示・レベル札 */
+  const fs=clamp(12/c.s,12,30);
+  for(let gx=-R;gx<=R;gx++)for(let gy=-R;gy<=R;gy++){
+    if(gx===0&&gy===0)continue;
+    const isSel=sel&&sel.gx===gx&&sel.gy===gy;
+    if(!bAt(gx,gy)){if(objs.some(o=>covers(o,gx,gy)))plotTop(gx,gy,isSel);}
+    else if(isSel&&objs.some(o=>covers(o,gx,gy)))plotTop(gx,gy,true);
+  }
+  for(const b of S.b)badge(b,fs);
+  if(hover&&!(sel&&hover.gx===sel.gx&&hover.gy===sel.gy)&&isLand(hover.gx,hover.gy))tag(hover.gx,hover.gy,fs,false);
+  if(sel)tag(sel.gx,sel.gy,fs*1.08,true);
   drawClouds();
   drawParticles();
   drawGold();
