@@ -395,6 +395,11 @@ const sfx={
 
 /* ================= セーブ ================= */
 function save(){
+  if(!started)return;
+  try{
+    const raw=localStorage.getItem(SAVE_KEY);
+    if(raw){const o=JSON.parse(raw);if(o&&typeof o.total==='number'&&o.total>S.total+1e-6)return;}
+  }catch(e){}
   try{S.t=Date.now();localStorage.setItem(SAVE_KEY,JSON.stringify({
     coins:S.coins,run:S.run,total:S.total,gears:S.gears,rad:S.rad,unl:S.unl,buffT:S.buffT,taps:S.taps,deliv:S.deliv,sound:S.sound,low:S.low,t:S.t,
     b:S.b.map(b=>({gx:b.gx,gy:b.gy,type:b.type,lv:b.lv,t:b.t}))
