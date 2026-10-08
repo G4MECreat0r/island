@@ -118,6 +118,9 @@ button.chip:not(:disabled):active{transform:translateY(1px)}
 .mbtn{border:1px solid var(--line);background:transparent;border-radius:8px;padding:9px 14px;font-weight:700;font-size:14px}
 .mbtn.pri{background:linear-gradient(180deg,var(--brass-hi),var(--brass));color:var(--brass-ink);border-color:#8a6414}
 .mbtn.dng{color:var(--bad);border-color:var(--bad)}
+.agrid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:0 0 14px}
+.agrid .mbtn{padding:8px 6px;font-size:13px}
+.agrid h3{grid-column:1/-1;margin:6px 0 0;font-size:12px;color:var(--ink2);font-weight:700}
 .kv{display:grid;grid-template-columns:1fr auto;gap:6px 14px;font-size:13px;margin:0 0 14px}
 .kv span:nth-child(even){font-weight:700;font-variant-numeric:tabular-nums;text-align:right}
 
@@ -622,11 +625,47 @@ $('#modal').addEventListener('click',e=>{
     const a=t.dataset.m;
     if(a==='close')closeModal();
     else if(a==='reforge'){closeModal();doReforge();}
+    else if(a==='adm'){admin(t.dataset.k);}
     else if(a==='sound'){S.sound=!S.sound;t.textContent=S.sound?'サウンド:オン':'サウンド:オフ';if(S.sound)audioInit();save();}
     else if(a==='wipe'){if(t.dataset.sure==='1'){try{localStorage.removeItem(SAVE_KEY);}catch(x){}wiping=true;location.reload();}else{t.dataset.sure='1';t.textContent='もう一度押すと、すべて消えます';}}
   }else if(e.target.id==='modal')closeModal();
 });
-let wiping=false;
+let wiping=false,speed=1;
+function admin(k){
+  const T=TYPES;
+  switch(k){
+    case 'c4':S.coins+=1e4;break;
+    case 'c6':S.coins+=1e6;break;
+    case 'c8':S.coins+=1e8;break;
+    case 'c12':S.coins+=1e12;break;
+    case 'cx10':S.coins*=10;break;
+    case 'run':S.run+=1e8;S.total+=1e8;break;
+    case 'gear':S.gears+=10;break;
+    case 'unl':S.unl=T.length-1;break;
+    case 'exp':if(S.rad<MAXR){S.rad=MAXR;expandT=0;sfx.expand();}break;
+    case 'lv10':S.b.forEach(b=>{b.lv+=10;b.pulse=1;});break;
+    case 'lv100':S.b.forEach(b=>{b.lv=Math.max(b.lv,100);b.pulse=1;});break;
+    case 'fill':{const ty=[0,1,2,3,4,5];let n=0;for(let x=-S.rad;x<=S.rad;x++)for(let y=-S.rad;y<=S.rad;y++){if((x||y)&&!bAt(x,y)){S.b.push({gx:x,gy:y,type:ty[n++%6],lv:1,t:0,pulse:1,smk:0});}}S.unl=T.length-1;break;}
+    case 't1m':{const g=ips()*60;S.coins+=g;S.run+=g;S.total+=g;break;}
+    case 't1h':{const g=ips()*3600;S.coins+=g;S.run+=g;S.total+=g;break;}
+    case 'gold':GC.on=true;GC.t=0;GC.dir=1;GC.y0=-200;GC.dur=14;break;
+    case 'buff':S.buffT=60;break;
+    case 'spd':speed=speed===1?5:speed===5?20:1;toast('ゲーム速度 ×'+speed);break;
+    case 'clear':S.b=[];PARCELS.length=0;sel=null;break;
+  }
+  renderStruct();save();
+  const b=$('[data-k="spd"]');
+  toast('実行:'+k+'(資金 '+fmt(S.coins)+')',1400);
+}
+let admTaps=0,admT=0,adminOn=false,keyBuf='';
+function openAdmin(){
+  if(!started)return;
+  adminOn=true;audioInit();
+  const B=(k,l)=>'<button class="mbtn" data-m="adm" data-k="'+k+'">'+l+'</button>';
+  showModal('<h2>管理者メニュー</h2><div class="agrid"><h3>資金</h3>'+B('c4','+1万')+B('c6','+100万')+B('c8','+1億')+B('c12','+1兆')+B('cx10','資金×10')+B('run','累計収入+1億(再起動用)')+'<h3>進行</h3>'+B('unl','全建物を解禁')+B('exp','島を最大まで拡張')+B('fill','空き区画を全部建設')+B('clear','建物をすべて撤去')+B('lv10','全建物 Lv+10')+B('lv100','全建物 Lv100以上')+B('gear','歯車+10')+B('t1m','1分スキップ')+B('t1h','1時間スキップ')+'<h3>その他</h3>'+B('gold','金の荷を出す')+B('buff','生産×3(60秒)')+B('spd','ゲーム速度切替(×1/5/20)')+'</div><div class="row"><button class="mbtn pri" data-m="close">閉じる</button></div>');
+}
+$('.bank').addEventListener('click',()=>{const n=performance.now();if(n-admT>2500)admTaps=0;admT=n;if(++admTaps>=7){admTaps=0;openAdmin();}});
+window.addEventListener('keydown',e=>{keyBuf=(keyBuf+e.key.toLowerCase()).slice(-5);if(keyBuf==='admin')openAdmin();});
 $('#btnMenu').addEventListener('click',()=>{
   audioInit();
   showModal('<h2>島の記録</h2><div class="kv"><span>これまでの総収入</span><span>'+fmt(S.total)+'</span><span>納品した荷</span><span>'+S.deliv.toLocaleString('ja-JP')+'</span><span>集荷塔のタップ</span><span>'+S.taps.toLocaleString('ja-JP')+'</span><span>歯車</span><span>'+S.gears+'</span></div><div class="row"><button class="mbtn" data-m="sound">'+(S.sound?'サウンド:オン':'サウンド:オフ')+'</button><button class="mbtn dng" data-m="wipe">データを消去</button><button class="mbtn pri" data-m="close">閉じる</button></div>');
@@ -1184,7 +1223,7 @@ let last=0,saveT=0,started=false;
 function frame(now){
   let dt=(now-last)/1000;last=now;if(!(dt>0))dt=.016;dt=Math.min(dt,.1);
   if(started){
-    step(dt);updateHud(dt);
+    for(let i=0;i<speed;i++)step(dt);updateHud(dt);
     saveT+=dt;if(saveT>5){saveT=0;save();}
   }
   render();
