@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>鋳物の島 Foundry Isle</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -36,7 +36,7 @@
   --panel:rgba(14,30,37,.9);--panel-solid:#0e1e25;--ink:#e8efec;--ink2:#9fb3b8;--line:rgba(232,239,236,.14);
   --brass:#d9a441;--brass-hi:#f0c56a;--ok:#8cc49a;--bad:#e08a6e;--verd:#79c2b1;
 }
-*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;touch-action:manipulation;-webkit-touch-callout:none}
 html,body{height:100%;margin:0;overflow:hidden;background:var(--bg)}
 body{color:var(--ink);font-family:'Zen Kaku Gothic New','Hiragino Kaku Gothic ProN','Yu Gothic',system-ui,sans-serif;font-weight:500;-webkit-user-select:none;user-select:none;overscroll-behavior:none}
 button{font:inherit;color:inherit;cursor:pointer}
@@ -953,7 +953,10 @@ cv.addEventListener('pointerup',e=>endPtr(e,false));
 cv.addEventListener('pointercancel',e=>endPtr(e,true));
 cv.addEventListener('pointerleave',()=>{hover=null;});
 cv.addEventListener('wheel',e=>{e.preventDefault();userZoom=clamp(userZoom*Math.exp(-e.deltaY*.0012),.6,2.4);},{passive:false});
-cv.addEventListener('dblclick',()=>{userZoom=1;panX=0;panY=0;});
+let lastPT='mouse';
+cv.addEventListener('pointerdown',e=>{lastPT=e.pointerType;},true);
+cv.addEventListener('dblclick',e=>{e.preventDefault();if(lastPT==='mouse'){userZoom=1;panX=0;panY=0;}});
+['gesturestart','gesturechange','gestureend'].forEach(t=>document.addEventListener(t,e=>e.preventDefault()));
 
 /* ================= UI ================= */
 const panel=$('#panel');let structKey='';
