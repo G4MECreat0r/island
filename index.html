@@ -129,6 +129,10 @@ button.chip:not(:disabled):active{transform:translateY(1px)}
 .arow.off{opacity:.45}
 .arow .ok{font-size:12px;font-weight:700;color:var(--ok)}
 #modal p.small{font-size:12px;color:var(--ink2);margin:0 0 8px}
+.rank{margin-top:7px;font-size:11px;color:var(--ink2);cursor:pointer;font-weight:700}
+.rbar{height:4px;background:var(--line);border-radius:2px;margin-top:3px;overflow:hidden}
+.rbar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--brass),var(--brass-hi))}
+.br .mbtn{padding:6px 8px;font-size:12px}
 .kv{display:grid;grid-template-columns:1fr auto;gap:6px 14px;font-size:13px;margin:0 0 14px}
 .kv span:nth-child(even){font-weight:700;font-variant-numeric:tabular-nums;text-align:right}
 
@@ -158,13 +162,15 @@ button.chip:not(:disabled):active{transform:translateY(1px)}
       <div class="lbl">資金</div>
       <div class="num" id="coins">0</div>
       <div class="rate" id="ips">+0/秒</div>
+      <div class="rank" id="rank"><span id="rankt"></span><div class="rbar"><i id="rbari"></i></div></div>
     </div>
     <div class="hudr">
       <div class="chip buff hidden" id="buff"></div>
-      <div class="chip hidden" id="gearchip" title="歯車:すべての生産が+8%ずつ上がる">
+      <div class="chip hidden" id="gearchip" title="歯車:多いほど生産が伸びる(伸びは徐々に緩やかになる)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg>
         <span id="gears">0</span>
       </div>
+      <button class="chip" id="btnWx"></button>
       <button class="chip" id="btnAch"></button>
       <button class="chip hidden" id="btnTech"></button>
       <button class="iconbtn" id="btnMenu" aria-label="メニュー">
@@ -250,15 +256,16 @@ const MS=[10,25,50,100,150,200,300,400,500];
 const EXPAND_COST={3:6000,4:900000};
 const REFORGE_MIN=5e6;
 
-function defaultState(){return {coins:15,run:0,total:0,gears:0,rad:2,unl:0,b:[],buffT:0,taps:0,deliv:0,sound:true,music:true,mvol:2,low:false,tech:{},gp:0,ach:{},golds:0,reforges:0,t:Date.now()};}
+function defaultState(){return {coins:15,run:0,total:0,gears:0,rad:2,unl:0,b:[],buffT:0,taps:0,deliv:0,sound:true,music:true,mvol:2,low:false,rank:0,v:2,tech:{},gp:0,ach:{},golds:0,reforges:0,t:Date.now()};}
 let S=defaultState();
 let achCount=0;
 const DEPOT={gx:0,gy:0,pulse:0,lv:1,depot:true};
 
 const tierOf=lv=>{let n=0;for(const m of MS)if(lv>=m)n++;return n;};
-const multOf=lv=>Math.pow(2,tierOf(lv));
+const multOf=lv=>Math.pow(1.5+.05*techLv('ms'),tierOf(lv));
 const techLv=id=>(S.tech&&S.tech[id])||0;
-const gm=()=>(1+.08*S.gears)*(S.buffT>0?3:1)*(1+.1*techLv('prod'))*(1+.02*achCount);
+const gearMult=g=>1+.06*Math.pow(g,.9);
+const gm=()=>gearMult(S.gears)*(S.buffT>0?3:1)*(1+.05*techLv('prod'))*(1+.02*achCount)*(1+.02*S.rank);
 const costF=()=>Math.max(.5,1-.04*techLv('cost'));
 const goldF=()=>1-.1*techLv('gold');
 const START_COINS=[15,500,2e4,1e6,5e7,2e9];
@@ -270,8 +277,9 @@ function adjOf(b){
   for(const d of NB){const x=b.gx+d[0],y=b.gy+d[1];if(x===0&&y===0){m+=.15;continue;}const n=bAt(x,y);if(!n)continue;m+=n.type!==b.type?.10:.04;}
   return 1+m*(1+.5*techLv('adj'));
 }
-const cycleAmt=b=>TYPES[b.type].inc*b.lv*multOf(b.lv)*gm()*adjOf(b);
-const rateOf=b=>cycleAmt(b)/TYPES[b.type].T;
+const cyc=b=>TYPES[b.type].T*(1-.03*techLv('speed'));
+const cycleAmt=b=>TYPES[b.type].inc*Math.pow(b.lv,.9)*multOf(b.lv)*gm()*adjOf(b)*wxMult(b.type);
+const rateOf=b=>cycleAmt(b)/cyc(b);
 const ips=()=>{let a=0;for(const b of S.b)a+=rateOf(b);return a;};
 const upCost=(b,n)=>{const T=TYPES[b.type],g=T.g;return T.cost*Math.pow(g,b.lv)*(Math.pow(g,n)-1)/(g-1)*costF();};
 function maxBuy(b){
@@ -283,7 +291,7 @@ const countOf=i=>S.b.filter(b=>b.type===i).length;
 const placeCost=i=>TYPES[i].cost*Math.pow(1.5,countOf(i))*costF();
 const bAt=(gx,gy)=>S.b.find(b=>b.gx===gx&&b.gy===gy);
 const isLand=(gx,gy)=>Math.max(Math.abs(gx),Math.abs(gy))<=S.rad;
-const reforgeGain=()=>Math.floor(Math.sqrt(S.run/REFORGE_MIN));
+const reforgeGain=()=>S.run<REFORGE_MIN?0:Math.floor(Math.pow(Math.log10(S.run/REFORGE_MIN)+1,1.8));
 function hk(b){const s=1+Math.min(b.lv,150)/150*.7;return s*(1+(b.pulse||0)*.1);}
 const bh=b=>b.depot?1.0:BASEH[b.type]*hk(b);
 
@@ -423,6 +431,113 @@ const sfx={
 };
 
 
+
+/* ================= 天候 ================= */
+const WX={
+ clear:{n:'快晴',m:{0:.1,1:.3,6:.2,7:.1},d:'風車製粉所 +30% / 天空港 +20% / 星時計 +10% / 工房 +10%'},
+ rain:{n:'小雨',m:{0:.15,8:.6,2:-.1,6:-.2},d:'硝子の大温室 +60% / 工房 +15% / 鋳造所 −10% / 天空港 −20%'},
+ storm:{n:'嵐',m:{all:-.1,5:.6,3:.2,6:-.4},d:'エーテル炉 +60% / 精錬塔 +20% / 天空港 −40% / 他 −10%。ときどき落雷で臨時収入'},
+ fog:{n:'霧',m:{3:.25,4:.25,1:-.1,6:-.3},d:'精錬塔 +25% / 蒸気機関館 +25% / 風車製粉所 −10% / 天空港 −30%'},
+ rainbow:{n:'虹',m:{all:.15},d:'すべての生産 +15%。金の荷も飛んでくる'}
+};
+const WXLIST=['clear','rain','storm','fog','rainbow'];
+const WXS={cur:'clear',next:'rain',t:0,dur:rnd(70,110),vis:{rain:0,storm:0,fog:0,bow:0},lt:10,flash:0,bolt:null};
+function wxMult(type){
+  const w=WX[WXS.cur];let d=(w.m[type]||0)+(w.m.all||0);
+  const L=techLv('wx');
+  d=d>0?d*(1+.25*L):d*Math.max(0,1-.25*L);
+  return 1+d;
+}
+function pickNext(cur){
+  const tbl={clear:[['rain',.5],['fog',.3],['storm',.2]],rain:[['clear',.5],['storm',.3],['fog',.2]],storm:[['rain',.5],['clear',.5]],fog:[['clear',.6],['rain',.4]],rainbow:[['clear',1]]};
+  const t=tbl[cur];let r=Math.random();for(const x of t){if((r-=x[1])<=0)return x[0];}return t[0][0];
+}
+function setWeather(id,quiet){
+  WXS.cur=id;WXS.t=0;WXS.dur=id==='rainbow'?50:rnd(100,180);WXS.next=pickNext(id);WXS.lt=rnd(4,9);
+  if(id==='rainbow'&&!GC.on){GC.on=true;GC.t=0;GC.dir=1;GC.y0=-200;GC.dur=15;}
+  if(!quiet)toast('天気が「'+WX[id].n+'」に変わった:'+WX[id].d,4800);
+}
+function wxStep(dt){
+  WXS.t+=dt;
+  if(WXS.t>=WXS.dur){
+    const prev=WXS.cur;let nx=WXS.next;
+    if((prev==='rain'||prev==='storm')&&Math.random()<.5)nx='rainbow';
+    setWeather(nx);
+  }
+  const tg={rain:WXS.cur==='rain'?.6:WXS.cur==='storm'?1:0,storm:WXS.cur==='storm'?1:0,fog:WXS.cur==='fog'?1:0,bow:WXS.cur==='rainbow'?1:0};
+  for(const k in tg)WXS.vis[k]+=(tg[k]-WXS.vis[k])*Math.min(1,dt*.7);
+  if(WXS.flash>0)WXS.flash=Math.max(0,WXS.flash-dt*2.2);
+  if(WXS.cur==='storm'&&started){WXS.lt-=dt;if(WXS.lt<=0){WXS.lt=rnd(9,18);strike();}}
+}
+function thunder(){
+  if(!AC||!MU||!S.music)return;
+  const t=AC.currentTime+rnd(.2,1.1);
+  nz(t,180,.7,2.4,.6,'lowpass',MU.out);nz(t+.06,90,.5,2.8,.55,'lowpass',MU.out);
+}
+function strike(){
+  const tgt=S.b.length?S.b[(Math.random()*S.b.length)|0]:null;
+  const top=tgt?px(tgt.gx,tgt.gy,bh(tgt)):[rnd(-80,80),0];
+  const pts=[[top[0]+rnd(-30,30),-900]];let y=-900;
+  while(y<top[1]-60){y+=rnd(60,120);pts.push([lerp(pts[0][0],top[0],(y+900)/(top[1]+900))+rnd(-26,26),y]);}
+  pts.push([top[0],top[1]]);
+  WXS.bolt=pts;WXS.flash=1;thunder();shake=Math.max(shake,.45);
+  if(tgt){
+    const amt=rateOf(tgt)*12;credit(amt,false);addFloat(top[0],top[1]-30,'落雷 +'+fmt(amt,true),true);
+    tgt.pulse=1;sparkBurst(top[0],top[1],24,['#fff8d0','#bfe3ff','#ffe08a'],220);
+    const g=px(tgt.gx,tgt.gy,0);ring(g[0],g[1],90,'#cfe8ff',.6);
+  }
+}
+function drawWxWorld(){
+  const v=WXS.vis;
+  if(v.bow>.02){
+    const cols=['#d95b4a','#e9944a','#f0cf5a','#79b86a','#5aa9c9','#6a82c9'];
+    ctx.lineWidth=15;
+    for(let i=0;i<cols.length;i++){ctx.globalAlpha=.32*v.bow;ctx.strokeStyle=cols[i];ctx.beginPath();ctx.arc(30,280,830-i*15,Math.PI*1.1,Math.PI*1.9);ctx.stroke();}
+    ctx.globalAlpha=1;
+  }
+  if(WXS.flash>.02&&WXS.bolt){
+    const b=WXS.bolt;ctx.lineJoin='round';
+    ctx.strokeStyle='rgba(180,220,255,'+(.4*WXS.flash).toFixed(2)+')';ctx.lineWidth=14;ctx.beginPath();b.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));ctx.stroke();
+    ctx.strokeStyle='rgba(255,255,255,'+Math.min(1,WXS.flash*1.3).toFixed(2)+')';ctx.lineWidth=4;ctx.beginPath();b.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));ctx.stroke();
+  }
+  if(v.rain>.03){
+    ctx.lineWidth=1.6;
+    for(let i=0;i<34;i++){
+      const ph=(gt*1.2+hash(i,7))%1,x=(hash(i,8)-.5)*1600,y=(hash(i,9)-.5)*900;
+      ctx.strokeStyle='rgba(235,250,248,'+((1-ph)*.5*Math.min(1,v.rain)).toFixed(3)+')';
+      ctx.beginPath();ctx.ellipse(x,y,ph*18,ph*9,0,0,Math.PI*2);ctx.stroke();
+    }
+  }
+}
+function drawWxScreen(){
+  const v=WXS.vis;
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  const dark=.1*v.rain+.2*v.storm;
+  if(dark>.003){ctx.fillStyle='rgba(10,26,40,'+dark.toFixed(3)+')';ctx.fillRect(0,0,W,H);}
+  if(v.fog>.01){
+    ctx.fillStyle='rgba(206,223,228,'+(.3*v.fog).toFixed(3)+')';ctx.fillRect(0,0,W,H);
+    for(let i=0;i<5;i++){
+      const x=((i*W*.5+gt*(12+i*5))%(W*1.6))-W*.3,y=H*(.2+.15*i);
+      const g=ctx.createRadialGradient(x,y,10,x,y,W*.6);g.addColorStop(0,'rgba(235,245,246,'+(.28*v.fog).toFixed(3)+')');g.addColorStop(1,'rgba(235,245,246,0)');
+      ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+    }
+  }
+  if(v.rain>.02){
+    const n=Math.round(200*v.rain);
+    ctx.strokeStyle='rgba(222,236,246,'+(.38*Math.min(1,v.rain+.2)).toFixed(3)+')';ctx.lineWidth=1.3;ctx.beginPath();
+    for(let i=0;i<n;i++){const sp=700+hash(i,3)*400,y=((hash(i,2)*(H+60)+gt*sp)%(H+60))-30,x=((hash(i,1)*(W+200)+y*.22)%(W+200))-100;ctx.moveTo(x,y);ctx.lineTo(x-5,y+15);}
+    ctx.stroke();
+  }
+  const clear=Math.max(0,1-v.rain-v.fog-v.storm);
+  if(clear>.05){const g=ctx.createRadialGradient(W*.12,-H*.05,10,W*.12,-H*.05,W);g.addColorStop(0,'rgba(255,244,205,'+(.16*clear).toFixed(3)+')');g.addColorStop(1,'rgba(255,244,205,0)');ctx.fillStyle=g;ctx.fillRect(0,0,W,H);}
+  if(WXS.flash>.02){ctx.fillStyle='rgba(235,245,255,'+(.42*WXS.flash).toFixed(3)+')';ctx.fillRect(0,0,W,H);}
+}
+function openWx(){
+  const fc=techLv('fc')>0;
+  const rows=WXLIST.map(k=>'<div class="arow'+(k===WXS.cur?'':' off')+'"><div><div class="tn">'+(k===WXS.cur?'▶ ':'')+WX[k].n+'</div><div class="td">'+WX[k].d+'</div></div>'+(k===WXS.cur?'<span class="ok">現在</span>':(fc&&k===WXS.next?'<span class="ok">次</span>':''))+'</div>').join('');
+  showModal('<h2>天気</h2><p class="small">天気は移り変わり、建物ごとに生産が増減する。雨や嵐のあとは虹が出ることがある。研究「気象学」で恩恵が伸び、悪影響が減る。</p><div class="kv"><span>現在</span><span>'+WX[WXS.cur].n+'</span><span>残り</span><span>'+Math.ceil(WXS.dur-WXS.t)+'秒</span>'+(fc?'<span>次の天気</span><span>'+WX[WXS.next].n+'</span>':'')+'</div>'+rows+'<div class="row" style="margin-top:12px"><button class="mbtn pri" data-m="close">閉じる</button></div>');
+}
+
 /* ================= BGM(自動演奏) ================= */
 let MU=null;
 const CHORDS=[{b:38,p:[50,57,60,64,65]},{b:34,p:[53,58,62,65,69]},{b:41,p:[53,57,60,64,69]},{b:36,p:[55,60,64,67,74]}];
@@ -438,7 +553,7 @@ function voice(type,f,t,att,dur,rel,vol,dest,cut){
 function nz(t,f,q,dur,vol,type,dest){
   const s=AC.createBufferSource();s.buffer=MU.nb;const fl=AC.createBiquadFilter();fl.type=type;fl.frequency.value=f;fl.Q.value=q;
   const g=AC.createGain();g.gain.setValueAtTime(vol,t);g.gain.exponentialRampToValueAtTime(.0001,t+dur);
-  s.connect(fl);fl.connect(g);g.connect(dest);s.start(t,Math.random()*1.5,dur+.05);
+  s.connect(fl);fl.connect(g);g.connect(dest);s.loop=true;s.start(t,Math.random()*1.5,dur+.05);s.stop(t+dur+.1);
 }
 function kick(t){
   const o=AC.createOscillator(),g=AC.createGain();o.type='sine';o.frequency.setValueAtTime(95,t);o.frequency.exponentialRampToValueAtTime(42,t+.16);
@@ -452,9 +567,10 @@ function musicStart(){
   const dl=AC.createDelay(2);dl.delayTime.value=.536;const fb=AC.createGain();fb.gain.value=.34;const lp=AC.createBiquadFilter();lp.type='lowpass';lp.frequency.value=2400;
   const send=AC.createGain();send.gain.value=.55;send.connect(dl);dl.connect(lp);lp.connect(fb);fb.connect(dl);lp.connect(bus);
   const nb=AC.createBuffer(1,AC.sampleRate*2,AC.sampleRate);const nd=nb.getChannelData(0);for(let i=0;i<nd.length;i++)nd[i]=Math.random()*2-1;
+  const rs=AC.createBufferSource();rs.buffer=nb;rs.loop=true;const hp=AC.createBiquadFilter();hp.type='highpass';hp.frequency.value=1800;const rg=AC.createGain();rg.gain.value=0;rs.connect(hp);hp.connect(rg);rg.connect(out);rs.start();
   const oc=AC.createBufferSource();oc.buffer=nb;oc.loop=true;const bp=AC.createBiquadFilter();bp.type='bandpass';bp.frequency.value=500;bp.Q.value=.5;
   const og=AC.createGain();og.gain.value=0;oc.connect(bp);bp.connect(og);og.connect(out);oc.start();
-  MU={out:out,bus:bus,send:send,nb:nb,og:og,I:0,i:0,mi:4,dt:60/84/2,next:AC.currentTime+.2};
+  MU={out:out,bus:bus,send:send,nb:nb,og:og,rg:rg,I:0,i:0,mi:4,dt:60/84/2,next:AC.currentTime+.2};
   MU.timer=setInterval(musicTick,110);
   musicTick();
 }
@@ -483,6 +599,7 @@ function musicTick(){
   if(!AC||!MU)return;
   const now=AC.currentTime;
   MU.out.gain.setTargetAtTime(S.music?MVOL[S.mvol]:0,now,.4);
+  MU.rg.gain.setTargetAtTime(S.music?.07*(WXS.vis.rain+.4*WXS.vis.storm):0,now,1.2);
   if(!S.music||AC.state!=='running')return;
   const tgt=clamp((Math.log10(ips()+1)-1)/9,0,1);MU.I+=(tgt-MU.I)*.06;
   MU.og.gain.setTargetAtTime(.04+.03*Math.sin(now*.25),now,1);
@@ -498,7 +615,7 @@ function save(){
     if(raw){const o=JSON.parse(raw);if(o&&typeof o.total==='number'&&o.total>S.total+1e-6)return;}
   }catch(e){}
   try{S.t=Date.now();localStorage.setItem(SAVE_KEY,JSON.stringify({
-    coins:S.coins,run:S.run,total:S.total,gears:S.gears,rad:S.rad,unl:S.unl,buffT:S.buffT,taps:S.taps,deliv:S.deliv,sound:S.sound,music:S.music,mvol:S.mvol,low:S.low,tech:S.tech,gp:S.gp,ach:S.ach,golds:S.golds,reforges:S.reforges,t:S.t,
+    coins:S.coins,run:S.run,total:S.total,gears:S.gears,rad:S.rad,unl:S.unl,buffT:S.buffT,taps:S.taps,deliv:S.deliv,sound:S.sound,music:S.music,mvol:S.mvol,low:S.low,rank:S.rank,v:2,tech:S.tech,gp:S.gp,ach:S.ach,golds:S.golds,reforges:S.reforges,t:S.t,
     b:S.b.map(b=>({gx:b.gx,gy:b.gy,type:b.type,lv:b.lv,t:b.t}))
   }));}catch(e){}
 }
@@ -512,6 +629,8 @@ function hasSave(){return !!load();}
 function applySave(d){
   S=Object.assign(defaultState(),d);
   S.tech=S.tech||{};S.ach=S.ach||{};achCount=Object.keys(S.ach).length;
+  if(!(d.v>=2)){S.gears=Math.min(S.gears,100);S.gp=Math.min(S.gp,150);}
+  S.v=2;S.rank=rankOf(S.total);
   S.b=(d.b||[]).map(b=>({gx:b.gx,gy:b.gy,type:b.type,lv:b.lv,t:b.t||0,pulse:0,smk:rnd(0,.4)}));
 }
 
@@ -538,12 +657,13 @@ function step(dt){
   gt+=dt;
   ZU=lerp(ZU,S.low?32:72,Math.min(1,dt*7));
   if(S.buffT>0)S.buffT=Math.max(0,S.buffT-dt);
+  wxStep(dt);
   achT+=dt;if(achT>.6){achT=0;checkAch();}
   const ai=[0,5,2,1][techLv('auto')];
   if(ai){autoT+=dt;if(autoT>=ai){autoT=0;const am=tapAmt();credit(am,false);DEPOT.pulse=1;const t=depotTop();addFloat(t[0]+rnd(-12,12),t[1]-4,'+'+fmt(am,true));}}
   for(const b of S.b){
-    const T=TYPES[b.type];b.t+=dt;
-    if(b.t>=T.T){b.t-=T.T;if(b.t>T.T)b.t=0;launch(b);}
+    const Tc=cyc(b);b.t+=dt;
+    if(b.t>=Tc){b.t-=Tc;if(b.t>Tc)b.t=0;launch(b);}
     if(b.pulse>0)b.pulse=Math.max(0,b.pulse-dt*2.4);
     b.smk-=dt;
   }
@@ -572,7 +692,7 @@ const GC={on:false,x:0,y:0,t:0,dur:16,y0:-200,dir:1,next:28};
 
 function applyOffline(sec){
   if(sec<20)return;
-  const s=Math.min(sec,8*3600);
+  const s=Math.min(sec,(8+2*techLv('offcap'))*3600);
   const gain=ips()*s*(.5+.1*techLv('off'));
   if(gain<1)return;
   S.coins+=gain;S.run+=gain;S.total+=gain;
@@ -593,6 +713,29 @@ function doBuild(i){
   sfx.build();shake=Math.max(shake,.18);
   renderStruct();save();
 }
+
+let delArm=-9999;
+function refundOf(b){
+  const T=TYPES[b.type],g=T.g;
+  const place=T.cost*Math.pow(1.5,Math.max(0,countOf(b.type)-1))*costF();
+  const ups=T.cost*g*(Math.pow(g,b.lv-1)-1)/(g-1)*costF();
+  return .6*(place+ups);
+}
+function doDemolish(){
+  const b=selB();if(!b||b.depot)return;
+  const now=performance.now();
+  if(now-delArm>3000){delArm=now;updatePanel();return;}
+  delArm=-9999;
+  const amt=refundOf(b);S.coins+=amt;
+  const i=S.b.indexOf(b);if(i>=0)S.b.splice(i,1);
+  const p=px(b.gx,b.gy,.2);
+  for(let k=0;k<22;k++)emit({kind:'smoke',x:p[0]+rnd(-34,34),y:p[1]+rnd(-14,14),vx:rnd(-30,30),vy:rnd(-50,-10),life:rnd(.7,1.2),size:rnd(8,15),col:'#cfc6b3'});
+  addFloat(p[0],p[1]-20,'+'+fmt(amt,true));
+  tone(180,.3,'sawtooth',.07,0,60);
+  toast('撤去した。資金 +'+fmt(amt)+'(建設費の6割が戻る)');
+  renderStruct();save();
+}
+
 function doUpgrade(){
   const b=selB();if(!b||b.depot)return;
   let n=mode==='max'?maxBuy(b):parseInt(mode,10);
@@ -614,7 +757,7 @@ function milestone(b){
   shake=.7;sfx.milestone();
   sparkBurst(p[0],p[1],42,['#f3cf72','#fff1c2','#d98b45','#8fd0c0'],260);
   ring(p[0],p[1],190,'#f0c56a',1);ring(p[0],p[1],130,'#fff1c2',.8);
-  toast('「'+TYPES[b.type].name+'」Lv'+b.lv+' ─ 生産力が2倍になった');
+  toast('「'+TYPES[b.type].name+'」Lv'+b.lv+' ─ 生産力が×'+(1.5+.05*techLv('ms')).toFixed(2)+'になった');
 }
 function doExpand(){
   if(S.rad>=MAXR)return;
@@ -634,14 +777,20 @@ function doReforge(){
 
 /* ================= 研究・実績 ================= */
 const TECH=[
- {id:'prod',name:'生産効率',max:10,cost:l=>1+l,eff:l=>'すべての生産 +'+l*10+'%'},
+ {id:'prod',name:'生産効率',max:20,cost:l=>Math.ceil(1+l*1.4),eff:l=>'すべての生産 +'+l*5+'%'},
+ {id:'speed',name:'工程の短縮',max:10,cost:l=>Math.ceil(3+l*2),eff:l=>'生産サイクル −'+l*3+'%'},
+ {id:'ms',name:'倍化の極意',max:5,cost:l=>[6,9,13,18,25][l],eff:l=>'節目(Lv10,25…)の倍率 ×'+(1.5+.05*l).toFixed(2)},
  {id:'tap',name:'集荷塔の強化',max:5,cost:l=>[2,3,4,6,8][l],eff:l=>'タップ収入 ×'+(1+l)},
  {id:'start',name:'開業資金',max:5,cost:l=>[1,2,3,4,6][l],eff:l=>'再起動後の初期資金 '+fmt(START_COINS[l])},
- {id:'cost',name:'資材の調達',max:8,cost:l=>[2,3,4,5,6,8,10,12][l],eff:l=>'建築・強化の費用 −'+l*4+'%'},
+ {id:'cost',name:'資材の調達',max:10,cost:l=>Math.ceil(2+l*1.6),eff:l=>'建築・強化の費用 −'+l*4+'%'},
  {id:'gold',name:'金の荷の誘致',max:5,cost:l=>[2,3,4,6,8][l],eff:l=>'出現間隔 −'+l*10+'% / 報酬 +'+l*10+'%'},
+ {id:'buff',name:'加速の持続',max:5,cost:l=>Math.ceil(2+l*2.5),eff:l=>'生産×3の持続 '+(30+10*l)+'秒(1回あたり)'},
  {id:'off',name:'留守番の職人',max:5,cost:l=>[2,3,4,5,6][l],eff:l=>'留守中の収入 '+(50+l*10)+'%'},
+ {id:'offcap',name:'長い留守番',max:6,cost:l=>Math.ceil(2+l*2),eff:l=>'留守の上限 '+(8+2*l)+'時間'},
  {id:'auto',name:'自動集荷',max:3,cost:l=>[4,8,15][l],eff:l=>['なし','集荷塔を5秒ごとに自動タップ','2秒ごとに自動タップ','1秒ごとに自動タップ'][l]},
- {id:'adj',name:'都市計画',max:3,cost:l=>[3,5,8][l],eff:l=>'隣接ボーナス +'+l*50+'%'}
+ {id:'adj',name:'都市計画',max:3,cost:l=>[3,5,8][l],eff:l=>'隣接ボーナス +'+l*50+'%'},
+ {id:'wx',name:'気象学',max:4,cost:l=>[4,7,11,16][l],eff:l=>'天気の恩恵 +'+l*25+'% / 悪影響 −'+l*25+'%'},
+ {id:'fc',name:'天気予報',max:1,cost:l=>5,eff:l=>l?'次の天気と時刻が分かる':'なし'}
 ];
 function openResearch(){
   const rows=TECH.map(t=>{
@@ -695,6 +844,8 @@ const ACH=[
 function checkAch(){
   let adj=0,mlv=0,tier=0;
   for(const b of S.b){adj=Math.max(adj,adjOf(b));mlv=Math.max(mlv,b.lv);tier=Math.max(tier,tierOf(b.lv));}
+  const rk=rankOf(S.total);
+  if(rk>S.rank){S.rank=rk;toast('島ランクが上がった「'+RANKS[rk].n+'」生産 +2%',4600);sfx.milestone();const dt=depotTop();sparkBurst(dt[0],dt[1],50,['#f3cf72','#fff1c2','#8fd0c0'],260);ring(0,0,280,'#f0c56a',1);shake=.5;save();}
   const c={adj:adj,mlv:mlv,tier:tier},got=[];
   for(const a of ACH){if(S.ach[a.id])continue;if(a.t(c)){S.ach[a.id]=1;achCount++;got.push(a);}}
   if(got.length){
@@ -705,6 +856,24 @@ function checkAch(){
 function openAch(){
   const rows=ACH.map(a=>'<div class="arow'+(S.ach[a.id]?'':' off')+'"><div><div class="tn">'+a.n+'</div><div class="td">'+a.d+'</div></div>'+(S.ach[a.id]?'<span class="ok">解除済み +2%</span>':'<span class="td">未解除</span>')+'</div>').join('');
   showModal('<h2>実績</h2><div class="kv"><span>解除数</span><span>'+achCount+' / '+ACH.length+'</span><span>実績による生産ボーナス</span><span>+'+achCount*2+'%</span></div>'+rows+'<div class="row" style="margin-top:12px"><button class="mbtn pri" data-m="close">閉じる</button></div>');
+}
+
+
+/* ================= 島ランク ================= */
+const RANKS=[
+ {n:'流れ着いた島',th:0},{n:'小さな漁村',th:1e3},{n:'職人の集落',th:1e5},{n:'工房街',th:1e7},{n:'工業港',th:1e9},
+ {n:'鋳物の町',th:1e11},{n:'煙突の都',th:1e13},{n:'蒸気都市',th:1e15},{n:'天空都市',th:1e17},{n:'星の都',th:1e19},
+ {n:'硝子の楽園',th:1e21},{n:'永久機関の島',th:1e24},{n:'伝説の島',th:1e27}
+];
+function rankOf(total){let r=0;for(let i=0;i<RANKS.length;i++)if(total>=RANKS[i].th)r=i;return r;}
+function rankProg(){
+  const r=S.rank;if(r>=RANKS.length-1)return 1;
+  const a=r===0?0:Math.log10(RANKS[r].th),c=Math.log10(RANKS[r+1].th),v=Math.log10(Math.max(1,S.total));
+  return clamp((v-a)/(c-a),0,1);
+}
+function openRank(){
+  const rows=RANKS.map((r,i)=>'<div class="arow'+(i<=S.rank?'':' off')+'"><div><div class="tn">'+(i===S.rank?'▶ ':'')+'ランク'+i+' '+r.n+'</div><div class="td">'+(i===0?'はじまり':'累計収入 '+fmt(r.th))+'</div></div>'+(i<=S.rank?'<span class="ok">生産 +'+i*2+'%</span>':'<span class="td">未到達</span>')+'</div>').join('');
+  showModal('<h2>島ランク</h2><p class="small">累計収入に応じて島のランクが上がり、生産が永続で+2%ずつ伸びる(最大+24%)。再起動しても下がらない。</p><div class="kv"><span>現在</span><span>'+RANKS[S.rank].n+'</span><span>累計収入</span><span>'+fmt(S.total)+'</span></div>'+rows+'<div class="row" style="margin-top:12px"><button class="mbtn pri" data-m="close">閉じる</button></div>');
 }
 
 /* ================= 入力 ================= */
@@ -757,7 +926,7 @@ function grabGold(){
     S.golds++;const amt=Math.max(ips()*rnd(45,120),30)*(1+.1*techLv('gold'));credit(amt,false);
     addFloat(GC.x,GC.y,'+'+fmt(amt),true);toast('金の荷を受け取った。資金 +'+fmt(amt));
   }else{
-    S.golds++;S.buffT=Math.min(S.buffT+30,120);addFloat(GC.x,GC.y,'生産 ×3',true);toast('金の荷が届いた。30秒間、すべての生産が3倍');
+    S.golds++;S.buffT=Math.min(S.buffT+30+10*techLv('buff'),160);addFloat(GC.x,GC.y,'生産 ×3',true);toast('金の荷が届いた。しばらくの間、すべての生産が3倍');
   }
 }
 function localXY(e){const r=cv.getBoundingClientRect();return [e.clientX-r.left,e.clientY-r.top];}
@@ -829,6 +998,7 @@ function admin(k){
     case 'gold':GC.on=true;GC.t=0;GC.dir=1;GC.y0=-200;GC.dur=14;break;
     case 'buff':S.buffT=60;break;
     case 'spd':speed=speed===1?5:speed===5?20:1;toast('ゲーム速度 ×'+speed);break;
+    case 'wx':{const i=WXLIST.indexOf(WXS.cur);setWeather(WXLIST[(i+1)%WXLIST.length]);break;}
     case 'clear':S.b=[];PARCELS.length=0;sel=null;break;
   }
   renderStruct();save();
@@ -840,7 +1010,7 @@ function openAdmin(){
   if(!started)return;
   adminOn=true;audioInit();
   const B=(k,l)=>'<button class="mbtn" data-m="adm" data-k="'+k+'">'+l+'</button>';
-  showModal('<h2>管理者メニュー</h2><div class="agrid"><h3>資金</h3>'+B('c4','+1万')+B('c6','+100万')+B('c8','+1億')+B('c12','+1兆')+B('cx10','資金×10')+B('run','累計収入+1億(再起動用)')+'<h3>進行</h3>'+B('unl','全建物を解禁')+B('exp','島を最大まで拡張')+B('fill','空き区画を全部建設')+B('clear','建物をすべて撤去')+B('lv10','全建物 Lv+10')+B('lv100','全建物 Lv100以上')+B('gear','歯車+10')+B('gp','研究ポイント+10')+B('t1m','1分スキップ')+B('t1h','1時間スキップ')+'<h3>その他</h3>'+B('gold','金の荷を出す')+B('buff','生産×3(60秒)')+B('spd','ゲーム速度切替(×1/5/20)')+'</div><div class="row"><button class="mbtn pri" data-m="close">閉じる</button></div>');
+  showModal('<h2>管理者メニュー</h2><div class="agrid"><h3>資金</h3>'+B('c4','+1万')+B('c6','+100万')+B('c8','+1億')+B('c12','+1兆')+B('cx10','資金×10')+B('run','累計収入+1億(再起動用)')+'<h3>進行</h3>'+B('unl','全建物を解禁')+B('exp','島を最大まで拡張')+B('fill','空き区画を全部建設')+B('clear','建物をすべて撤去')+B('lv10','全建物 Lv+10')+B('lv100','全建物 Lv100以上')+B('gear','歯車+10')+B('gp','研究ポイント+10')+B('t1m','1分スキップ')+B('t1h','1時間スキップ')+'<h3>その他</h3>'+B('wx','天気を切り替え')+B('gold','金の荷を出す')+B('buff','生産×3(60秒)')+B('spd','ゲーム速度切替(×1/5/20)')+'</div><div class="row"><button class="mbtn pri" data-m="close">閉じる</button></div>');
 }
 $('.bank').addEventListener('click',()=>{const n=performance.now();if(n-admT>2500)admTaps=0;admT=n;if(++admTaps>=7){admTaps=0;openAdmin();}});
 window.addEventListener('keydown',e=>{keyBuf=(keyBuf+e.key.toLowerCase()).slice(-5);if(keyBuf==='admin')openAdmin();});
@@ -848,6 +1018,8 @@ $('#btnMenu').addEventListener('click',()=>{
   audioInit();
   showModal('<h2>島の記録</h2><div class="kv"><span>これまでの総収入</span><span>'+fmt(S.total)+'</span><span>納品した荷</span><span>'+S.deliv.toLocaleString('ja-JP')+'</span><span>集荷塔のタップ</span><span>'+S.taps.toLocaleString('ja-JP')+'</span><span>歯車</span><span>'+S.gears+'</span></div><div class="row"><button class="mbtn" data-m="music">'+(S.music?'BGM:オン':'BGM:オフ')+'</button><button class="mbtn" data-m="mvol">BGM音量:'+['','小','中','大'][S.mvol]+'</button><button class="mbtn" data-m="sound">'+(S.sound?'効果音:オン':'効果音:オフ')+'</button><button class="mbtn dng" data-m="wipe">データを消去</button><button class="mbtn pri" data-m="close">閉じる</button></div>');
 });
+$('#rank').addEventListener('click',e=>{e.stopPropagation();audioInit();openRank();});
+$('#btnWx').addEventListener('click',()=>{audioInit();openWx();});
 $('#btnAch').addEventListener('click',()=>{audioInit();openAch();});
 $('#btnTech').addEventListener('click',()=>{audioInit();openResearch();});
 $('#btnView').addEventListener('click',()=>{audioInit();S.low=!S.low;save();});
@@ -855,13 +1027,14 @@ $('#btnExpand').addEventListener('click',()=>{audioInit();doExpand();});
 $('#btnReforge').addEventListener('click',()=>{
   audioInit();const g=reforgeGain();
   if(g<1){toast('あと '+fmt(Math.max(0,REFORGE_MIN-S.run))+' 稼ぐと再起動できる');return;}
-  showModal('<h2>島を再起動する</h2><p>建物と資金は消え、島は最初の姿に戻ります。引き換えに<b>歯車を '+g+' 個</b>得て(研究ポイントも同数)、すべての生産が+'+Math.round((g+S.gears)*8)+'%になります。解禁済みの建物は残ります。</p><div class="row"><button class="mbtn" data-m="close">やめる</button><button class="mbtn pri" data-m="reforge">再起動する</button></div>');
+  showModal('<h2>島を再起動する</h2><p>建物と資金は消え、島は最初の姿に戻ります。引き換えに<b>歯車を '+g+' 個</b>と<b>研究ポイントを '+g+'</b> 得ます。歯車による生産倍率は ×'+gearMult(S.gears).toFixed(2)+' → ×'+gearMult(S.gears+g).toFixed(2)+' になります。解禁済みの建物、研究、実績は残ります。</p><div class="row"><button class="mbtn" data-m="close">やめる</button><button class="mbtn pri" data-m="reforge">再起動する</button></div>');
 });
 panel.addEventListener('click',e=>{
   const t=e.target.closest('[data-act]');if(!t)return;audioInit();
   const a=t.dataset.act;
   if(a==='build'){doBuild(parseInt(t.dataset.i,10));}
   else if(a==='up')doUpgrade();
+  else if(a==='del')doDemolish();
   else if(a==='mode'){mode=t.dataset.m;updatePanel(true);}
 });
 
@@ -870,7 +1043,7 @@ function renderStruct(){
   let key,html;
   if(!sel){key='none';html='<div class="tip"><b>集荷塔</b>をタップで資金が増える。区画を選んで建物を建て、空を横切る<b>金の荷</b>を見つけたらすぐ触れよう。ドラッグで移動、ピンチで拡大。</div>';}
   else if(b&&b.depot){key='depot';html='<div class="ph"><span class="pt">集荷塔</span><span class="ps">島のすべての荷がここへ届く</span></div><div class="tip">タップ1回で <b id="dTap"></b> の資金。生産が育つほど、1タップの価値も上がる。<br>納品した荷:<b id="dDel"></b>個</div>';}
-  else if(b){key='b'+b.type;html='<div class="bwrap"><div class="bl"><div class="bn"><span id="bn"></span><span class="lvb" id="blv"></span></div><div class="bd" id="bd"></div><div class="bst"><div><b id="brate"></b><small>毎秒</small></div><div><b id="bcyc"></b><small>1回の納品</small></div><div><b id="bmul"></b><small>倍率</small></div><div><b id="badj"></b><small>隣接ボーナス</small></div></div><div class="ms"><div class="bar"><i id="bbar"></i></div><div class="mt" id="bnext"></div></div></div><div class="br"><div class="seg"><button data-act="mode" data-m="1">×1</button><button data-act="mode" data-m="10">×10</button><button data-act="mode" data-m="max">最大</button></div><button class="go" id="bgo" data-act="up"><span id="bgol"></span><span class="gc">'+coinG+'<span id="bgoc"></span></span></button></div></div>';}
+  else if(b){key='b'+b.type;html='<div class="bwrap"><div class="bl"><div class="bn"><span id="bn"></span><span class="lvb" id="blv"></span></div><div class="bd" id="bd"></div><div class="bst"><div><b id="brate"></b><small>毎秒</small></div><div><b id="bcyc"></b><small>1回の納品</small></div><div><b id="bmul"></b><small>倍率</small></div><div><b id="badj"></b><small>隣接</small></div><div><b id="bwx"></b><small>天気</small></div></div><div class="ms"><div class="bar"><i id="bbar"></i></div><div class="mt" id="bnext"></div></div></div><div class="br"><div class="seg"><button data-act="mode" data-m="1">×1</button><button data-act="mode" data-m="10">×10</button><button data-act="mode" data-m="max">最大</button></div><button class="go" id="bgo" data-act="up"><span id="bgol"></span><span class="gc">'+coinG+'<span id="bgoc"></span></span></button><button class="mbtn dng" id="bdel" data-act="del"></button></div></div>';}
   else{key='empty';html='<div class="ph"><span class="pt">空き区画</span><span class="ps">建てる建物を選ぶ</span></div><div class="cards">'+TYPES.map((T,i)=>'<button class="card" data-act="build" data-i="'+i+'"><div class="cn"></div><div class="cd"></div><div class="cr"><span class="cp">'+coinG+'<span class="ccost"></span></span><span class="cs"></span></div></button>').join('')+'</div>';}
   structKey=key;panel.innerHTML=html;updatePanel(true);
 }
@@ -882,14 +1055,16 @@ function updatePanel(force){
   if(b){
     const T=TYPES[b.type];
     setText($('#bn'),T.name);setText($('#blv'),'Lv '+b.lv);setText($('#bd'),T.desc);
-    setText($('#brate'),fmt(rateOf(b),true));setText($('#bcyc'),fmt(cycleAmt(b),true)+' / '+T.T+'秒');setText($('#badj'),'×'+adjOf(b).toFixed(2));setText($('#bmul'),'×'+fmt(multOf(b.lv)*(1+.08*S.gears)));
+    setText($('#brate'),fmt(rateOf(b),true));setText($('#bcyc'),fmt(cycleAmt(b),true)+' / '+cyc(b).toFixed(1)+'秒');setText($('#badj'),'×'+adjOf(b).toFixed(2));setText($('#bmul'),'×'+fmt(multOf(b.lv)*(1+.08*S.gears)));
     const nx=MS.find(m=>m>b.lv);const pv=[0].concat(MS).filter(m=>m<=b.lv).pop();
-    if(nx){$('#bbar').style.width=(100*(b.lv-pv)/(nx-pv)).toFixed(1)+'%';setText($('#bnext'),'Lv'+nx+'で生産力2倍(あと'+(nx-b.lv)+')');}
+    if(nx){$('#bbar').style.width=(100*(b.lv-pv)/(nx-pv)).toFixed(1)+'%';setText($('#bnext'),'Lv'+nx+'で生産力×'+(1.5+.05*techLv('ms')).toFixed(2)+'(あと'+(nx-b.lv)+')');}
     else{$('#bbar').style.width='100%';setText($('#bnext'),'これ以上の倍化はない');}
     document.querySelectorAll('.seg button').forEach(x=>x.classList.toggle('on',x.dataset.m===mode));
     let n=mode==='max'?Math.max(1,maxBuy(b)):parseInt(mode,10);
     const cost=upCost(b,n);const ok=mode==='max'?maxBuy(b)>=1:S.coins>=cost;
     setText($('#bgol'),'強化 +'+n);setText($('#bgoc'),fmt(cost));$('#bgo').disabled=!ok;
+    setText($('#bdel'),(performance.now()-delArm<3000?'本当に撤去する':'撤去')+'(+'+fmt(refundOf(b))+')');
+    setText($('#bwx'),'×'+wxMult(b.type).toFixed(2));
     return;
   }
   const cards=panel.querySelectorAll('.card');
@@ -913,6 +1088,8 @@ function updateHud(dt){
   const bf=$('#buff');
   if(S.buffT>0){bf.classList.remove('hidden');setText(bf,'生産×3  あと'+Math.ceil(S.buffT)+'秒');}else bf.classList.add('hidden');
   const gc=$('#gearchip');if(S.gears>0){gc.classList.remove('hidden');setText($('#gears'),String(S.gears));}else gc.classList.add('hidden');
+  setText($('#rankt'),'島ランク '+S.rank+' '+RANKS[S.rank].n);$('#rbari').style.width=(rankProg()*100).toFixed(1)+'%';
+  setText($('#btnWx'),WX[WXS.cur].n+(techLv('fc')>0?' → '+WX[WXS.next].n+' '+Math.ceil(WXS.dur-WXS.t)+'秒':''));
   setText($('#btnAch'),'実績 '+achCount+'/'+ACH.length);
   const bt=$('#btnTech');if(S.gears>0||S.gp>0||S.reforges>0||S.run>=REFORGE_MIN*.4){bt.classList.remove('hidden');setText(bt,'研究'+(S.gp>0?'('+S.gp+')':''));}else bt.classList.add('hidden');
   setText($('#btnView'),S.low?'建物を元の高さに戻す':'建物を低く表示');
@@ -1007,7 +1184,7 @@ function plotBase(b){
 function progressRing(b){
   const T=TYPES[b.type],c=px(b.gx,b.gy,0),rx=.5*TW*.7071,ry=.5*TH*.7071;
   ctx.strokeStyle='rgba(255,250,225,.2)';ctx.lineWidth=2.2;ctx.beginPath();ctx.ellipse(c[0],c[1],rx,ry,0,0,Math.PI*2);ctx.stroke();
-  const p=b.t/T.T;
+  const p=b.t/cyc(b);
   ctx.strokeStyle='rgba(246,214,120,.95)';ctx.lineWidth=2.6;ctx.beginPath();ctx.ellipse(c[0],c[1],rx,ry,0,-Math.PI/2,-Math.PI/2+Math.PI*2*p);ctx.stroke();
 }
 function shadowOf(b){
@@ -1560,10 +1737,12 @@ function render(){
   if(hover&&!(sel&&hover.gx===sel.gx&&hover.gy===sel.gy)&&isLand(hover.gx,hover.gy))tag(hover.gx,hover.gy,fs,false);
   if(sel)tag(sel.gx,sel.gy,fs*1.08,true);
   drawClouds();
+  drawWxWorld();
   drawParticles();
   drawGold();
   drawFloats();
   /* ビネット */
+  drawWxScreen();
   ctx.setTransform(DPR,0,0,DPR,0,0);
   const v=ctx.createRadialGradient(W/2,H*.48,Math.min(W,H)*.35,W/2,H*.48,Math.max(W,H)*.8);
   v.addColorStop(0,'rgba(6,18,24,0)');v.addColorStop(1,'rgba(6,18,24,.42)');
@@ -1598,6 +1777,7 @@ function begin(fresh){
   if(!fresh){const d=load();if(d){applySave(d);away=(Date.now()-(d.t||Date.now()))/1000;}}
   else{try{localStorage.removeItem(SAVE_KEY);}catch(e){}S=defaultState();}
   achCount=Object.keys(S.ach||{}).length;
+  setWeather('clear',true);
   started=true;if(S.music)musicStart();dispCoins=S.coins;camScale=targetScale()*.9;
   $('#splash').classList.add('out');
   sel=null;renderStruct();
